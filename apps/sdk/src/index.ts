@@ -31,6 +31,19 @@ export default class Postiz {
     ).json();
   }
 
+  async postWithUrls(posts: any) {
+    return (
+      await fetch(`${this._path}/public/v1/postsurl`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: this._apiKey,
+        },
+        body: JSON.stringify(posts),
+      })
+    ).json();
+  }
+
   async postList(filters: GetPostsDto) {
     return (
       await fetch(`${this._path}/public/v1/posts?${toQueryString(filters)}`, {

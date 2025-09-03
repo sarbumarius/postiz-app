@@ -20,6 +20,8 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { UploadFactory } from '@gitroom/nestjs-libraries/upload/upload.factory';
 import { MediaService } from '@gitroom/nestjs-libraries/database/prisma/media/media.service';
 import { GetPostsDto } from '@gitroom/nestjs-libraries/dtos/posts/get.posts.dto';
+import { CreatePostUrlDto } from '@gitroom/nestjs-libraries/dtos/posts/create.post.url.dto';
+import { MediaDto } from '@gitroom/nestjs-libraries/dtos/media/media.dto';
 import {
   AuthorizationActions,
   Sections,
@@ -85,6 +87,26 @@ export class PublicIntegrationsController {
     return this._postsService.createPost(org.id, body);
   }
 
+  @Post('/postsurl')
+  @CheckPolicies([AuthorizationActions.Create, Sections.POSTS_PER_MONTH])
+  async createPostWithUrls(
+    @GetOrgFromRequest() org: Organization,
+    @Body() rawBody: CreatePostUrlDto
+  ) {
+    // Convert image URLs to MediaDto format
+    const convertedBody = await this.convertUrlsToMedia(rawBody, org.id);
+    
+    const body = await this._postsService.mapTypeToPost(
+      convertedBody,
+      org.id,
+      rawBody.type === 'draft'
+    );
+    body.type = rawBody.type;
+
+    console.log(JSON.stringify(body, null, 2));
+    return this._postsService.createPost(org.id, body);
+  }
+
   @Delete('/posts/:id')
   async deletePost(
     @GetOrgFromRequest() org: Organization,
@@ -132,5 +154,51 @@ export class PublicIntegrationsController {
     @Body() body: VideoFunctionDto
   ) {
     return this._mediaService.videoFunction(body.identifier, body.functionName, body.params);
+  }
+
+  private async convertUrlsToMedia(rawBody: CreatePostUrlDto, orgId: string): Promise<any> {
+    const convertedBody = { ...rawBody };
+    
+    for (const post of convertedBody.posts) {
+      for (const content of post.value) {
+        if (content.imageUrls && content.imageUrls.length > 0) {
+          const mediaArray: MediaDto[] = [];
+          
+          for (const imageUrl of content.imageUrls) {
+            try {
+              // Upload the image from URL
+              const uploadedPath = await this.storage.uploadSimple(imageUrl);
+              
+              // Save the file to the database
+              const savedMedia = await this._mediaService.saveFile(
+                orgId,
+                imageUrl.split('/').pop() || 'image',
+                uploadedPath
+              );
+              
+              // Convert to MediaDto format
+              mediaArray.push({
+                id: savedMedia.id,
+                path: savedMedia.path,
+                alt: savedMedia.alt || '',
+                thumbnail: savedMedia.thumbnail
+              });
+            } catch (error) {
+              console.error(`Failed to upload image from URL ${imageUrl}:`, error);
+              throw new HttpException(
+                { msg: `Failed to upload image from URL: ${imageUrl}` },
+                400
+              );
+            }
+          }
+          
+          // Replace imageUrls with image array in MediaDto format
+          (content as any).image = mediaArray;
+          delete (content as any).imageUrls;
+        }
+      }
+    }
+    
+    return convertedBody;
   }
 }
